@@ -85,7 +85,6 @@
         src: "/tmp/cilium-linux-{{ cli_arch }}.tar.gz"
         dest: /usr/local/bin
         remote_src: yes
-        extra_opts: [--strip-components=1]
 
     - name: Remove downloaded files
       file:
@@ -96,7 +95,7 @@
         - '.sha256sum'
 
 - name: Install Cilium
-  command: cilium install --version {{ kubernetes_cilium_version }}
+  command: /usr/local/bin/cilium install --version {{ kubernetes_cilium_version }}
   when:
     - kubernetes_pod_network.cni == 'cilium'
     - not kubernetes_init_stat.stat.exists
