@@ -51,8 +51,15 @@
     - kubernetes_pod_network.cni == 'cilium'
     - not kubernetes_init_stat.stat.exists
 
+- name: Check if Cilium CLI has already been Installed.
+  stat:
+    path: /usr/local/bin/cilium
+  register: cilium_init_stat
+
 - name: Install Cilium CLI
-  when: kubernetes_pod_network.cni == 'cilium'
+  when:
+    - kubernetes_pod_network.cni == 'cilium'
+    - not cilium_init_stat.stat.exists
   block:
     - name: Get Cilium CLI version
       shell: curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt
@@ -94,7 +101,7 @@
         - ''
         - '.sha256sum'
 
-- name: Install Cilium
+- name: Configure Cilium networking
   command: /usr/local/bin/cilium install --version {{ kubernetes_cilium_version }}
   when:
     - kubernetes_pod_network.cni == 'cilium'
