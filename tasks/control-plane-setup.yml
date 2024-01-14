@@ -110,6 +110,8 @@
 
 - name: Install Prerequisite CRDs for Cilium Gateway API support.
   when: install_gateway_api
+  register: gateway_crds
+  changed_when: "'created' in gateway_crds.stdout"
   command: "kubectl apply -f {{ item }}"
   loop:
     - https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.0.0/config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml
