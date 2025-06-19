@@ -5,6 +5,13 @@
       - haproxy
       - keepalived
     state: present
+    
+- name: Create keepalived script user
+  ansible.builtin.user:
+    name: keepalived_script
+    system: true
+    shell: /sbin/nologin
+    state: present
 
 - name: Deploy Keepalived health check script
   ansible.builtin.template:
