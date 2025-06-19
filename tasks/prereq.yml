@@ -51,6 +51,19 @@
     state: present
   notify: restart kubelet
 
+- name: Ensure br_netfilter is configured to load on boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k8s.conf
+    content: "br_netfilter"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Load br_netfilter module for the current session
+  community.general.modprobe:
+    name: br_netfilter
+    state: present
+
 - name: Let iptables see bridged traffic
   ansible.builtin.sysctl:
     name: "{{ item }}"

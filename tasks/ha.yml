@@ -27,10 +27,14 @@
     mode: '0644'
   notify: restart haproxy
 
-- name: Enable HA services
+- name: Force all notified handlers to run now
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure HA services are enabled and running
   ansible.builtin.systemd:
     name: "{{ item }}"
     enabled: true
+    state: started
   loop:
     - keepalived
     - haproxy
