@@ -1,6 +1,7 @@
 ---
 # Kubernetes component versions and configuration
-k8s_version: '1.33'
+k8s_version: 1.33
+k8s_version_minor: 2
 k8s_api_server_port: 6443
 k8s_allow_pods_on_control_plane: true
 k8s_private_ip: "{{ ansible_default_ipv4.address }}"
@@ -14,7 +15,7 @@ k8s_ha_router_id: 51
 k8s_ha_health_check_script: /usr/local/bin/k8s_api_health_check.sh
 
 # Cilium CNI configuration
-k8s_cilium_version: '1.15.5'
+k8s_cilium_version: '0.18.4'
 k8s_cilium_helm_values:
   kubeProxyReplacement: true
   gatewayAPI:

@@ -5,14 +5,14 @@
 - name: Perform prerequisite setup
   ansible.builtin.include_tasks: prereq.yml
 
-- name: Set up High Availability components
-  ansible.builtin.include_tasks: ha.yml
-  when: k8s_ha_enabled
 
-# - name: Set up Kubernetes control plane
-#   ansible.builtin.include_tasks: control-plane.yml
-#   when: inventory_hostname in groups['k8s_control_plane']
+- name: Set up Kubernetes control plane
+  ansible.builtin.include_tasks: control-plane.yml
+  when: inventory_hostname in groups['k8s_control_plane']
 
-# - name: Set up Kubernetes worker nodes
-#   ansible.builtin.include_tasks: worker-node.yml
-#   when: inventory_hostname in groups['k8s_worker_nodes']
+- name: Set up Kubernetes worker nodes
+  ansible.builtin.include_tasks: worker-node.yml
+  when: inventory_hostname in groups['k8s_worker_nodes']
+
+- name: Flush handlers to apply network changes
+  ansible.builtin.meta: flush_handlers

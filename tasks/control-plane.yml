@@ -23,15 +23,44 @@
     state: directory
     mode: '0755'
 
-- name: Copy admin.conf to user's .kube directory
-  ansible.builtin.copy:
+- name: Create .kube directory for ansible user on all control plane nodes
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0755'
+
+- name: Fetch admin.conf from the first master to the controller
+  ansible.builtin.fetch:
     src: /etc/kubernetes/admin.conf
-    dest: /root/.kube/config
-    remote_src: true
-    owner: root
-    group: root
+    dest: "/tmp/admin.conf"
+    flat: yes
+  when: inventory_hostname == groups['k8s_control_plane'][0]
+
+- name: Distribute admin.conf to all control plane nodes for the ansible user
+  ansible.builtin.copy:
+    src: "/tmp/admin.conf"
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
     mode: '0600'
-  when: not k8s_admin_conf.stat.exists
+
+- name: Create .kube directory for root user on all control plane nodes
+  ansible.builtin.file:
+    path: "/root/.kube"
+    state: directory
+    owner: "root"
+    group: "root"
+    mode: '0700'
+
+- name: Distribute admin.conf to all control plane nodes for the root user
+  ansible.builtin.copy:
+    src: "/tmp/admin.conf"
+    dest: "/root/.kube/config"
+    owner: "root"
+    group: "root"
+    mode: '0600'
 
 - name: Get join command for control plane nodes
   ansible.builtin.command: kubeadm token create --print-join-command

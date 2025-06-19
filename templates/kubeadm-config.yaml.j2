@@ -1,19 +1,24 @@
 ---
-apiVersion: kubeadm.k8s.io/v1beta3
+apiVersion: kubeadm.k8s.io/v1beta4
 kind: InitConfiguration
 localAPIEndpoint:
   advertiseAddress: "{{ k8s_private_ip }}"
   bindPort: {{ k8s_api_server_port }}
 nodeRegistration:
+  criSocket: unix:///var/run/containerd/containerd.sock
+  imagePullPolicy: IfNotPresent
+  imagePullSerial: true
   kubeletExtraArgs:
-    node-ip: "{{ k8s_private_ip }}"
+    - name: node-ip
+      value: "{{ k8s_private_ip }}"
 ---
-apiVersion: kubeadm.k8s.io/v1beta3
+apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
-kubernetesVersion: "v{{ k8s_version }}"
+kubernetesVersion: "v{{ k8s_version }}.{{ k8s_version_minor }}"
 controlPlaneEndpoint: "{{ k8s_ha_api_vip }}:{{ k8s_ha_api_port }}"
 networking:
-  podSubnet: "10.244.0.0/16" # Cilium default, can be overridden via helm values
+  podSubnet: "10.244.0.0/16" # Cilium default
+  serviceSubnet: "10.96.0.0/12" # Kubernetes default 
 apiServer:
   certSANs:
     - "{{ k8s_ha_api_vip }}"
