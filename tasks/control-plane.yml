@@ -1,0 +1,84 @@
+---
+- name: Check if cluster is already initialized
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: k8s_admin_conf
+
+- name: Generate kubeadm configuration
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: /etc/kubernetes/kubeadm-config.yaml
+    mode: '0644'
+
+- name: Initialize control plane on the first master
+  ansible.builtin.command: "kubeadm init --config /etc/kubernetes/kubeadm-config.yaml --upload-certs"
+  when:
+    - not k8s_admin_conf.stat.exists
+    - inventory_hostname == groups['k8s_control_plane'][0]
+  register: kubeadm_init_result
+
+- name: Create .kube directory for root user
+  ansible.builtin.file:
+    path: /root/.kube
+    state: directory
+    mode: '0755'
+
+- name: Copy admin.conf to user's .kube directory
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /root/.kube/config
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0600'
+  when: not k8s_admin_conf.stat.exists
+
+- name: Get join command for control plane nodes
+  ansible.builtin.command: kubeadm token create --print-join-command
+  register: k8s_join_command_control_plane_raw
+  run_once: true
+  delegate_to: "{{ groups['k8s_control_plane'][0] }}"
+
+- name: Get control plane certificate key
+  ansible.builtin.command: kubeadm init phase upload-certs --upload-certs
+  register: k8s_upload_certs_result
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ groups['k8s_control_plane'][0] }}"
+
+- name: Set join facts for other control plane nodes
+  ansible.builtin.set_fact:
+    k8s_join_command_control_plane: "{{ k8s_join_command_control_plane_raw.stdout }} --control-plane --certificate-key {{ k8s_upload_certs_result.stdout_lines[-1] }}"
+  run_once: true
+
+- name: Join subsequent control plane nodes
+  ansible.builtin.command: "{{ hostvars[groups['k8s_control_plane'][0]].k8s_join_command_control_plane }}"
+  when:
+    - not k8s_admin_conf.stat.exists
+    - inventory_hostname != groups['k8s_control_plane'][0]
+
+- name: Get join command for worker nodes
+  ansible.builtin.command: kubeadm token create --print-join-command
+  register: k8s_join_command_worker_raw
+  run_once: true
+  delegate_to: "{{ groups['k8s_control_plane'][0] }}"
+
+- name: Set join fact for worker nodes
+  ansible.builtin.set_fact:
+    k8s_join_command_worker: "{{ k8s_join_command_worker_raw.stdout }}"
+  run_once: true
+
+- name: Install Cilium
+  ansible.builtin.include_tasks: cilium.yml
+  run_once: true
+  delegate_to: "{{ groups['k8s_control_plane'][0] }}"
+  when: not k8s_admin_conf.stat.exists
+
+- name: Untaint control plane nodes to allow pod scheduling
+  ansible.builtin.command: "kubectl taint nodes {{ inventory_hostname }} node-role.kubernetes.io/control-plane-"
+  register: taint_removed
+  changed_when: "'untainted' in taint_removed.stdout"
+  failed_when: taint_removed.rc != 0 and 'not found' not in taint_removed.stderr
+  when: k8s_allow_pods_on_control_plane
+  run_once: true # Tainting is a cluster-wide operation, but we run it on each node for idempotency
+  delegate_to: "{{ groups['k8s_control_plane'][0] }}"

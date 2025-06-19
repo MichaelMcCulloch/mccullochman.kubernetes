@@ -1,0 +1,9 @@
+#!/bin/sh
+# Health check for the local Kubernetes API server endpoint via HAProxy
+
+# Check if HAProxy is listening on the API port
+if ss -ltn | grep -q ":{{ k8s_ha_api_port }}"; then
+  exit 0
+else
+  exit 1
+fi

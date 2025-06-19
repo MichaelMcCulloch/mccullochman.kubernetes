@@ -1,103 +1,18 @@
 ---
-- name: Include OS-specific variables.
-  include_vars: "{{ ansible_os_family }}.yml"
+- name: Include OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
 
-- include_tasks: setup-RedHat.yml
-  when: ansible_os_family == 'RedHat'
+- name: Perform prerequisite setup
+  ansible.builtin.include_tasks: prereq.yml
 
-- include_tasks: setup-Debian.yml
-  when: ansible_os_family == 'Debian'
+- name: Set up High Availability components
+  ansible.builtin.include_tasks: ha.yml
+  when: k8s_ha_enabled
 
-- name: Ensure dependencies are installed.
-  package: name=curl state=present
+- name: Set up Kubernetes control plane
+  ansible.builtin.include_tasks: control-plane.yml
+  when: inventory_hostname in groups['k8s_control_plane']
 
-- name: Install Kubernetes packages.
-  package:
-    name: "{{ item.name | default(item) }}"
-    state: "{{ item.state | default('present') }}"
-  notify: restart kubelet
-  with_items: "{{ kubernetes_packages }}"
-
-- include_tasks: sysctl-setup.yml
-
-- include_tasks: kubelet-setup.yml # deprecated
-  when: kubernetes_kubelet_extra_args|length > 0
-
-- name: Ensure kubelet is started and enabled at boot.
-  service:
-    name: kubelet
-    state: started
-    enabled: true
-
-- name: Check if Kubernetes has already been initialized.
-  stat:
-    path: /etc/kubernetes/admin.conf
-  register: kubernetes_init_stat
-
-- name: Group the kubernetes Nodes
-  ansible.builtin.group_by:
-    key: k8s_{{ kubernetes_role }}
-
-# Set up Cilium Client.
-- include_tasks: cilium-client-setup.yml
-  when:
-    - inventory_hostname is in groups['k8s_control_plane']
-    - kubernetes_pod_network.cni == 'cilium'
-
-# Set up hubble Client.
-- include_tasks: hubble-client-setup.yml
-  when:
-    - inventory_hostname is in groups['k8s_control_plane']
-    - kubernetes_pod_network.cni == 'cilium'
-    - kubernetes_cilium_hubble_client
-    - kubernetes_cilium_values.hubble.relay.enabled is defined
-    - kubernetes_cilium_values.hubble.relay.enabled
-
-# Set up control plane.
-- include_tasks: control-plane-setup.yml
-  when: inventory_hostname == groups['k8s_control_plane'][0]
-
-# Set up nodes.
-- name: Get the kubeadm join new master certificate key.
-  shell:
-    executable: /bin/bash
-    cmd: set -o pipefail && kubeadm init phase upload-certs --upload-certs | tail --lines 1
-  changed_when: false
-  when: inventory_hostname == groups['k8s_control_plane'][0]
-  register: kubernetes_certificate_result
-
-# Set up nodes.
-- name: Get the kubeadm join command from the Kubernetes control plane.
-  command: kubeadm token create --print-join-command
-  changed_when: false
-  when: inventory_hostname == groups['k8s_control_plane'][0]
-  register: kubernetes_join_command_result
-
-- name: Set the kubeadm join command globally.
-  set_fact:
-    kubernetes_join_command: >
-      {{ kubernetes_join_command_result.stdout }}
-      {{ kubernetes_join_command_extra_opts }}
-  when: kubernetes_join_command_result.stdout is defined
-  delegate_to: "{{ item }}"
-  delegate_facts: true
-  with_items: "{{ groups['all'] }}"
-
-- name: Set the kubeadm join certificate globally.
-  set_fact:
-    kubernetes_certificate: >
-      {{ kubernetes_certificate_result.stdout }}
-  when: kubernetes_certificate_result.stdout is defined
-  delegate_to: "{{ item }}"
-  delegate_facts: true
-  with_items: "{{ groups['all'] }}"
-
-- include_tasks: node-setup.yml
-  when: kubernetes_role == 'node'
-
-- include_tasks: control-plane-aux-setup.yml
-  when:
-    - inventory_hostname is in groups['k8s_control_plane']
-    - inventory_hostname != groups['k8s_control_plane'][0]
-    - inventory_hostname == item
-  loop: "{{ groups['k8s_control_plane'] }}"
+- name: Set up Kubernetes worker nodes
+  ansible.builtin.include_tasks: worker-node.yml
+  when: inventory_hostname in groups['k8s_worker_nodes']

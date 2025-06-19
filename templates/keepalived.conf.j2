@@ -1,0 +1,31 @@
+global_defs {
+  router_id K8S_MASTER
+  enable_script_security
+}
+
+vrrp_script chk_haproxy {
+  script "{{ k8s_ha_health_check_script }}"
+  interval 2
+  weight 20
+}
+
+vrrp_instance VI_1 {
+  state {{ 'MASTER' if inventory_hostname == groups['k8s_control_plane'][0] else 'BACKUP' }}
+  interface {{ k8s_ha_interface }}
+  virtual_router_id {{ k8s_ha_router_id }}
+  priority {{ 101 if inventory_hostname == groups['k8s_control_plane'][0] else 100 }}
+  advert_int 1
+
+  authentication {
+    auth_type PASS
+    auth_pass k8s_secure_pass
+  }
+
+  virtual_ipaddress {
+    {{ k8s_ha_api_vip }}/24
+  }
+
+  track_script {
+    chk_haproxy
+  }
+}

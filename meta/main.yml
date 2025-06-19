@@ -1,33 +1,31 @@
 ---
-dependencies: []
-
 galaxy_info:
   role_name: kubernetes
-  author: geerlingguy
-  description: Kubernetes for Linux.
-  company: "Midwestern Mac, LLC"
-  license: "license (BSD, MIT)"
-  min_ansible_version: 2.10
+  author: System
+  description: Installs a high-availability Kubernetes cluster with Cilium.
+  license: "MIT"
+  min_ansible_version: 2.12
   platforms:
     - name: Debian
       versions:
-        - stretch
         - buster
         - bullseye
     - name: Ubuntu
       versions:
-        - xenial
-        - bionic
         - focal
         - jammy
+    - name: EL
+      versions:
+        - 8
+        - 9
   galaxy_tags:
     - system
     - containers
-    - docker
-    - rkt
-    - orchestration
     - kubernetes
     - k8s
-    - paas
-    - saas
-    - hosting
+    - ha
+    - cilium
+    - haproxy
+    - keepalived
+
+dependencies: []

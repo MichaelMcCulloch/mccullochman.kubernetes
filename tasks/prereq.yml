@@ -1,0 +1,70 @@
+---
+- name: Install prerequisites (Debian)
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - "{{ procps_package_debian }}"
+    state: present
+  when: ansible_os_family == 'Debian'
+
+- name: Add Kubernetes apt repository key (Debian)
+  ansible.builtin.get_url:
+    url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/Release.key"
+    dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+    mode: '0644'
+  when: ansible_os_family == 'Debian'
+
+- name: Add Kubernetes apt repository (Debian)
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/ /"
+    state: present
+    update_cache: true
+  when: ansible_os_family == 'Debian'
+
+- name: Install prerequisites (RedHat)
+  ansible.builtin.yum:
+    name:
+      - curl
+      - "{{ procps_package_redhat }}"
+    state: present
+  when: ansible_os_family == 'RedHat'
+
+- name: Add Kubernetes yum repository (RedHat)
+  ansible.builtin.yum_repository:
+    name: kubernetes
+    description: Kubernetes
+    baseurl: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/"
+    gpgkey: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/repodata/repomd.xml.key"
+    gpgcheck: true
+    repo_gpgcheck: true
+    enabled: true
+  when: ansible_os_family == 'RedHat'
+
+- name: Install Kubernetes packages
+  ansible.builtin.package:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+  notify: restart kubelet
+
+- name: Let iptables see bridged traffic
+  ansible.builtin.sysctl:
+    name: "{{ item }}"
+    value: '1'
+    state: present
+    sysctl_file: /etc/sysctl.d/99-kubernetes-cri.conf
+    reload: true
+  loop:
+    - net.bridge.bridge-nf-call-iptables
+    - net.bridge.bridge-nf-call-ip6tables
+    - net.ipv4.ip_forward
+
+- name: Enable and start kubelet
+  ansible.builtin.systemd:
+    name: kubelet
+    state: started
+    enabled: true

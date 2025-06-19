@@ -1,0 +1,29 @@
+---
+- name: Set Cilium CLI architecture
+  ansible.builtin.set_fact:
+    cilium_cli_arch: "{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"
+
+- name: Download Cilium CLI
+  ansible.builtin.unarchive:
+    src: "https://github.com/cilium/cilium-cli/releases/download/v{{ k8s_cilium_version }}/cilium-linux-{{ cilium_cli_arch }}.tar.gz"
+    dest: /usr/local/bin
+    remote_src: true
+    mode: '0755'
+    extra_opts: [--strip-components=0]
+
+- name: Write Cilium Helm values to a temporary file
+  ansible.builtin.copy:
+    content: "{{ k8s_cilium_helm_values | to_nice_yaml }}"
+    dest: /tmp/cilium-values.yaml
+    mode: '0644'
+
+- name: Install Cilium via CLI
+  ansible.builtin.command: >
+    /usr/local/bin/cilium install
+    --version {{ k8s_cilium_version }}
+    --values /tmp/cilium-values.yaml
+  register: cilium_install_result
+  changed_when: "'Error' not in cilium_install_result.stdout"
+  until: cilium_install_result is not failed
+  retries: 5
+  delay: 10
