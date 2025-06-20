@@ -1,29 +1,56 @@
 ---
+
+- name: Taint nodes with cilium agent-not-ready
+  ansible.builtin.command: kubectl taint nodes --all node.cilium.io/agent-not-ready=true:NoExecute --overwrite
+  register: cilium_taint
+  changed_when: "'tainted' in cilium_taint.stdout"
+  until: cilium_taint is not failed
+  retries: 5
+  delay: 5
+
+- name: Install Prerequisite CRDs for Cilium Gateway API support
+  ansible.builtin.command: "kubectl apply -f {{ item }}"
+  register: gateway_crds
+  changed_when: "'created' in gateway_crds.stdout or 'configured' in gateway_crds.stdout"
+  loop:
+    - https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.2.0/config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml
+    - https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.2.0/config/crd/standard/gateway.networking.k8s.io_gateways.yaml
+    - https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.2.0/config/crd/standard/gateway.networking.k8s.io_httproutes.yaml
+    - https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.2.0/config/crd/standard/gateway.networking.k8s.io_referencegrants.yaml
+    - https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.2.0/config/crd/standard/gateway.networking.k8s.io_grpcroutes.yaml
+  when: kubernetes_cilium_helm_values.gatewayAPI.enabled | default(false)
+
 - name: Set Cilium CLI architecture
   ansible.builtin.set_fact:
     cilium_cli_arch: "{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"
 
 - name: Download Cilium CLI
   ansible.builtin.unarchive:
-    src: "https://github.com/cilium/cilium-cli/releases/download/v{{ k8s_cilium_version }}/cilium-linux-{{ cilium_cli_arch }}.tar.gz"
+    src: "https://github.com/cilium/cilium-cli/releases/download/v{{ kubernetes_cilium_cli_version }}/cilium-linux-{{ cilium_cli_arch }}.tar.gz"
     dest: /usr/local/bin
     remote_src: true
-    mode: '0755'
+    mode: "0755"
     extra_opts: [--strip-components=0]
 
 - name: Write Cilium Helm values to a temporary file
   ansible.builtin.copy:
-    content: "{{ k8s_cilium_helm_values | to_nice_yaml }}"
+    content: "{{ kubernetes_cilium_helm_values | to_nice_yaml }}"
     dest: /tmp/cilium-values.yaml
-    mode: '0644'
+    mode: "0644"
+
 
 - name: Install Cilium via CLI
   ansible.builtin.command: >
     /usr/local/bin/cilium install
-    --version {{ k8s_cilium_version }}
+    --version {{ kubernetes_cilium_version }}
     --values /tmp/cilium-values.yaml
   register: cilium_install_result
   changed_when: "'Error' not in cilium_install_result.stdout"
   until: cilium_install_result is not failed
-  retries: 5
+  retries: 1
   delay: 10
+
+- name: Remove cilium agent-not-ready taint
+  ansible.builtin.command: kubectl taint nodes --all node.cilium.io/agent-not-ready:NoExecute-
+  register: cilium_untaint
+  changed_when: "'untainted' in cilium_untaint.stdout"

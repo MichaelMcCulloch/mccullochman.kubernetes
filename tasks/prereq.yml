@@ -5,69 +5,36 @@
       - apt-transport-https
       - ca-certificates
       - curl
-      - "{{ procps_package_debian }}"
+      - procps
     state: present
-  when: ansible_os_family == 'Debian'
 
-- name: Add Kubernetes apt repository key (Debian)
+- name: Add Kubernetes apt repository key
   ansible.builtin.get_url:
-    url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/Release.key"
+    url: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/deb/Release.key"
     dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
-    mode: '0644'
-  when: ansible_os_family == 'Debian'
+    mode: "0644"
 
-- name: Add Kubernetes apt repository (Debian)
+- name: Add Kubernetes apt repository
   ansible.builtin.apt_repository:
-    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/ /"
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/deb/ /"
     state: present
     update_cache: true
-  when: ansible_os_family == 'Debian'
-
-- name: Install prerequisites (RedHat)
-  ansible.builtin.yum:
-    name:
-      - curl
-      - "{{ procps_package_redhat }}"
-    state: present
-  when: ansible_os_family == 'RedHat'
-
-- name: Add Kubernetes yum repository (RedHat)
-  ansible.builtin.yum_repository:
-    name: kubernetes
-    description: Kubernetes
-    baseurl: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/"
-    gpgkey: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/repodata/repomd.xml.key"
-    gpgcheck: true
-    repo_gpgcheck: true
-    enabled: true
-  when: ansible_os_family == 'RedHat'
 
 - name: Install Kubernetes packages
-  ansible.builtin.package:
+  ansible.builtin.apt:
     name:
-      - kubelet
-      - kubeadm
-      - kubectl
+      - "kubelet={{ kubernetes_version }}.{{ kubernetes_version_minor }}-*"
+      - "kubeadm={{ kubernetes_version }}.{{ kubernetes_version_minor }}-*"
+      - "kubectl={{ kubernetes_version }}.{{ kubernetes_version_minor }}-*"
     state: present
-  notify: restart kubelet
-
-- name: Ensure br_netfilter is configured to load on boot
-  ansible.builtin.copy:
-    dest: /etc/modules-load.d/k8s.conf
-    content: "br_netfilter"
-    owner: root
-    group: root
-    mode: '0644'
-
-- name: Load br_netfilter module for the current session
-  community.general.modprobe:
-    name: br_netfilter
-    state: present
+    update_cache: true
+    allow_downgrade: true
+  notify: Restart kubelet
 
 - name: Let iptables see bridged traffic
   ansible.builtin.sysctl:
     name: "{{ item }}"
-    value: '1'
+    value: "1"
     state: present
     sysctl_file: /etc/sysctl.d/99-kubernetes-cri.conf
     reload: true

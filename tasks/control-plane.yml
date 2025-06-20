@@ -2,114 +2,137 @@
 - name: Check if cluster is already initialized
   ansible.builtin.stat:
     path: /etc/kubernetes/admin.conf
-  register: k8s_admin_conf
+  register: kubernetes_admin_conf
 
+- name: Create a directory if it does not exist
+  ansible.builtin.file:
+    path: /etc/kubernetes
+    state: directory
+    mode: '0755'
+    
 - name: Generate kubeadm configuration
   ansible.builtin.template:
     src: kubeadm-config.yaml.j2
     dest: /etc/kubernetes/kubeadm-config.yaml
-    mode: '0644'
+    mode: "0644"
 
 - name: Initialize control plane on the first master
-  ansible.builtin.command: "kubeadm init --config /etc/kubernetes/kubeadm-config.yaml --upload-certs"
+  ansible.builtin.command: >
+    kubeadm init
+    --config /etc/kubernetes/kubeadm-config.yaml
+    --upload-certs
+    --skip-phases=addon/kube-proxy
   when:
-    - not k8s_admin_conf.stat.exists
-    - inventory_hostname == groups['k8s_control_plane'][0]
+    - not kubernetes_admin_conf.stat.exists
+    - inventory_hostname == groups['kubernetes_control_plane'][0]
   register: kubeadm_init_result
+  failed_when: false
 
-- name: Create .kube directory for root user
-  ansible.builtin.file:
-    path: /root/.kube
-    state: directory
-    mode: '0755'
+- ansible.builtin.debug:
+    msg: "{{ kubeadm_init_result }}"
 
-- name: Create .kube directory for ansible user on all control plane nodes
-  ansible.builtin.file:
-    path: "/home/{{ ansible_user }}/.kube"
-    state: directory
-    owner: "{{ ansible_user }}"
-    group: "{{ ansible_user }}"
-    mode: '0755'
-
-- name: Fetch admin.conf from the first master to the controller
-  ansible.builtin.fetch:
-    src: /etc/kubernetes/admin.conf
-    dest: "/tmp/admin.conf"
-    flat: yes
-  when: inventory_hostname == groups['k8s_control_plane'][0]
-
-- name: Distribute admin.conf to all control plane nodes for the ansible user
-  ansible.builtin.copy:
-    src: "/tmp/admin.conf"
-    dest: "/home/{{ ansible_user }}/.kube/config"
-    owner: "{{ ansible_user }}"
-    group: "{{ ansible_user }}"
-    mode: '0600'
-
-- name: Create .kube directory for root user on all control plane nodes
-  ansible.builtin.file:
-    path: "/root/.kube"
-    state: directory
-    owner: "root"
-    group: "root"
-    mode: '0700'
-
-- name: Distribute admin.conf to all control plane nodes for the root user
-  ansible.builtin.copy:
-    src: "/tmp/admin.conf"
-    dest: "/root/.kube/config"
-    owner: "root"
-    group: "root"
-    mode: '0600'
-
-- name: Get join command for control plane nodes
-  ansible.builtin.command: kubeadm token create --print-join-command
-  register: k8s_join_command_control_plane_raw
-  run_once: true
-  delegate_to: "{{ groups['k8s_control_plane'][0] }}"
-
-- name: Get control plane certificate key
-  ansible.builtin.command: kubeadm init phase upload-certs --upload-certs
-  register: k8s_upload_certs_result
-  changed_when: false
-  run_once: true
-  delegate_to: "{{ groups['k8s_control_plane'][0] }}"
-
-- name: Set join facts for other control plane nodes
-  ansible.builtin.set_fact:
-    k8s_join_command_control_plane: "{{ k8s_join_command_control_plane_raw.stdout }} --control-plane --certificate-key {{ k8s_upload_certs_result.stdout_lines[-1] }}"
-  run_once: true
-
-- name: Join subsequent control plane nodes
-  ansible.builtin.command: "{{ hostvars[groups['k8s_control_plane'][0]].k8s_join_command_control_plane }}"
-  when:
-    - not k8s_admin_conf.stat.exists
-    - inventory_hostname != groups['k8s_control_plane'][0]
-
-- name: Get join command for worker nodes
-  ansible.builtin.command: kubeadm token create --print-join-command
-  register: k8s_join_command_worker_raw
-  run_once: true
-  delegate_to: "{{ groups['k8s_control_plane'][0] }}"
-
-- name: Set join fact for worker nodes
-  ansible.builtin.set_fact:
-    k8s_join_command_worker: "{{ k8s_join_command_worker_raw.stdout }}"
-  run_once: true
-
-- name: Install Cilium on the first control plane node
+  
+- name: Prepare kubeconfig for kubectl on first master
   block:
-    - ansible.builtin.include_tasks: cilium.yml
+  
+    - name: Create .kube for root
+      ansible.builtin.file:
+        path: /root/.kube
+        state: directory
+        mode: 0755
+
+    - name: Symlink the kubectl admin.conf to /root/.kube/config.
+      file:
+        src: /etc/kubernetes/admin.conf
+        dest: /root/.kube/config
+        state: link
+        mode: 0644
+
+    - name: Symlink the kubectl admin.conf to ~/.kube/config.
+      file:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/{{ ansible_user }}/.kube/config
+        state: link
+        mode: 0644
+  when:
+    - inventory_hostname == groups['kubernetes_control_plane'][0]
   run_once: true
-  delegate_to: "{{ groups['k8s_control_plane'][0] }}"
-  when: not k8s_admin_conf.stat.exists
 
 - name: Untaint control plane nodes to allow pod scheduling
-  ansible.builtin.command: "kubectl taint nodes {{ item }} node-role.kubernetes.io/control-plane-"
+  ansible.builtin.command: "kubectl taint nodes {{ inventory_hostname }} node-role.kubernetes.io/control-plane-"
   register: taint_removed
   changed_when: "'untainted' in taint_removed.stdout"
   failed_when: taint_removed.rc != 0 and 'not found' not in taint_removed.stderr
-  when: k8s_allow_pods_on_control_plane
+  when: kubernetes_allow_pods_on_control_plane
   run_once: true
-  delegate_to: "{{ groups['k8s_control_plane'][0] }}"
-  loop: "{{ groups['k8s_control_plane'] }}"
+  delegate_to: "{{ groups['kubernetes_control_plane'][0] }}"
+
+
+- name: Configure Cilium CNI on the first control plane node
+  run_once: true
+  delegate_to: "{{ groups['kubernetes_control_plane'][0] }}"
+  block:
+
+    - name: Include Cilium installation tasks
+      ansible.builtin.include_tasks: cilium.yml
+
+# - name: Generate CoreDNS manifest
+#   ansible.builtin.command: >
+#     kubeadm init phase addon coredns
+#     --config=/etc/kubernetes/kubeadm-config.yaml
+#     --dry-run
+#     -o coredns.yaml
+#   args:
+#     chdir: /tmp # Or a suitable temporary directory on the control plane node
+#     creates: /tmp/coredns.yaml
+#   delegate_to: "{{ groups['kubernetes_control_plane'][0] }}"
+#   register: coredns_manifest_generation
+
+# - name: Apply CoreDNS manifest
+#   ansible.builtin.command: kubectl apply -f /tmp/coredns.yaml
+#   args:
+#     chdir: /tmp
+#   delegate_to: "{{ groups['kubernetes_control_plane'][0] }}"
+#   when: coredns_manifest_generation.rc == 0 
+
+# - name: Get join command for control plane nodes
+#   ansible.builtin.command: kubeadm token create --print-join-command
+#   register: kubernetes_join_command_control_plane_raw
+#   run_once: true
+#   delegate_to: "{{ groups['kubernetes_control_plane'][0] }}"
+
+# - name: Get control plane certificate key
+#   ansible.builtin.command: kubeadm init phase upload-certs --upload-certs
+#   register: kubernetes_upload_certs_result
+#   changed_when: false
+#   run_once: true
+#   delegate_to: "{{ groups['kubernetes_control_plane'][0] }}"
+
+# - name: Set join facts for other control plane nodes
+#   ansible.builtin.set_fact:
+#     kubernetes_join_command_control_plane: "{{ kubernetes_join_command_control_plane_raw.stdout }} --control-plane --certificate-key {{ kubernetes_upload_certs_result.stdout_lines[-1] }}"
+#   run_once: true
+
+# - name: Join subsequent control plane nodes
+#   ansible.builtin.command: "{{ hostvars[groups['kubernetes_control_plane'][0]].kubernetes_join_command_control_plane }}"
+#   when:
+#     - not kubernetes_admin_conf.stat.exists
+#     - inventory_hostname != groups['kubernetes_control_plane'][0]
+#   register: kubeadm_join_result
+
+# - name: Create .kube directory for root user
+#   ansible.builtin.file:
+#     path: /root/.kube
+#     state: directory
+#     mode: "0755"
+#   when: (kubeadm_init_result is defined and kubeadm_init_result.changed) or (kubeadm_join_result is defined and kubeadm_join_result.changed)
+
+# - name: Copy admin.conf to user's .kube directory
+#   ansible.builtin.copy:
+#     src: /etc/kubernetes/admin.conf
+#     dest: /root/.kube/config
+#     remote_src: true
+#     owner: root
+#     group: root
+#     mode: "0600"
+#   when: (kubeadm_init_result is defined and kubeadm_init_result.changed) or (kubeadm_join_result is defined and kubeadm_join_result.changed)
